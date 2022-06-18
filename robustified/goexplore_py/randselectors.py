@@ -193,9 +193,7 @@ class WeightedSelector:
         return self.get_neighbor(pos, offset) not in known_cells
 
     def get_pos_weight(self, pos, cell, known_cells, possible_scores):
-        if isinstance(pos, FetchState):
-            return self.door_weight * sum(pos.door_dists) + self.grip_weight * (pos.gripped_info[1] if pos.gripped_info is not None else 0)
-        elif isinstance(pos, tuple):
+        if isinstance(pos, tuple):
             # Logic for the score stuff: the highest score will get a weight of 1, second highest a weight of sqrt(1/2), third sqrt(1/3) etc.
             return self.dir_weights.score_high * 1 / np.sqrt(len(possible_scores) - possible_scores.index(cell.score))
         elif pos not in self.cached_pos_weights:
@@ -240,28 +238,6 @@ class WeightedSelector:
 
         if not isinstance(cell_key, tuple) and cell_key.level < self.max_level:
             level_weight = self.low_level_weight ** (self.max_level - cell_key.level)
-        elif isinstance(cell_key, FetchState):
-            if False:  # TODO: make this accessible somehow
-                level_weight = (1/self.low_level_weight)**sum([(e if isinstance(e, int) else sum(map(int, e))) for e in cell_key.object_pos])
-            else:
-                def generate_next_levels(obj_pos):
-                    next_levels = []
-                    if obj_pos[-1] == '0000':
-                        for new_elem in ['0001', '0010', '0100']:  # TODO: bring back 1000 if/when you find why it's never reached
-                            cur = list(obj_pos)
-                            cur[-1] = new_elem
-                            next_levels.append(tuple(cur))
-                    elif obj_pos[0] == '0000':
-                        new_obj_pos = list(obj_pos)
-                        for i in range(1, len(new_obj_pos)):
-                            if new_obj_pos[i] != '0000':
-                                new_obj_pos[i - 1] = new_obj_pos[-1]
-                                break
-                        next_levels.append(tuple(new_obj_pos))
-
-                    return next_levels
-
-                level_weight = 1.0
         if level_weight == 0.0:
             return 0.0
         res = (self.get_pos_weight(cell_key, cell, known_cells, possible_scores) +
