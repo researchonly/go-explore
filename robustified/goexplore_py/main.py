@@ -15,10 +15,7 @@ from goexplore_py.randselectors import *
 from goexplore_py.goexplore import *
 import goexplore_py.goexplore
 import goexplore_py.montezuma_env as montezuma_env
-import goexplore_py.pitfall_env as pitfall_env
 import goexplore_py.generic_atari_env as generic_atari_env
-import goexplore_py.generic_goal_conditioned_env as generic_goal_conditioned_env
-import goexplore_py.complex_fetch_env as complex_fetch_env
 import cProfile
 import gzip
 

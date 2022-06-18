@@ -12,7 +12,6 @@
 from .import_ai import *
 
 # from montezuma_env import *
-from goexplore_py.complex_fetch_env import *
 from goexplore_py.goexplore import DONE
 
 
@@ -106,10 +105,6 @@ class WeightedSelector:
 
                 self.possible_scores[self.get_score(cell_key, cell)] += 1
 
-                if isinstance(cell_key, FetchState):
-                    if cell_key.object_pos not in self.known_object_pos:
-                        self.known_object_pos.add(cell_key.object_pos)
-                        self.update_all = True
                 if not isinstance(cell_key, tuple):
                     if cell_key.x < self.xrange[0] or cell_key.x > self.xrange[1]:
                         self.xrange  = (min(cell_key.x, self.xrange[0]), max(cell_key.x, self.xrange[1]))
