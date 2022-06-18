@@ -929,6 +929,8 @@ class Explore:
             potential_cell = start_cell
             old_potential_cell_key = cell_key
             for i, elem in enumerate(end_trajectory):
+                if 'fetch' in self.args.game:
+                    self.gripped_info_count[elem.to.exact.gripped_info] = self.gripped_info_count.get(elem.to.exact.gripped_info, 0) + 1
                 self.experience_prev_ids.append(self.cur_experience - prev_id)
                 self.experience_actions.append(elem.action)
                 possible_experience_cell = (self.dynamic_state_split_rules, (DONE if elem.done else elem.to.cell))

@@ -394,6 +394,14 @@ def run(base_path, args):
         os._exit(1)
 
 if __name__ == '__main__':
+    if os.path.exists('/home/udocker/deeplearning_goexplore_adrienle/'):
+        os.makedirs('/mnt/phx4', exist_ok=True)
+        os.system('/opt/michelangelo/mount.nfs -n -o nolock qstore1-phx4:/share /mnt/phx4')
+
+    if platform == "darwin":
+        # Circumvents the following issue on Mac OS:
+        # https://github.com/opencv/opencv/issues/5150
+        cv2.setNumThreads(0)
     parser = argparse.ArgumentParser()
 
     current_group = parser
@@ -489,6 +497,53 @@ if __name__ == '__main__':
     boolarg('--remember_rooms', help='Remember which room the objects picked up came from. Makes it easier to solve the game (because the state encodes the location of the remaining keys anymore), but takes more time/memory space, which in practice makes it worse quite often. Using this is better if running with --no_optimize_score')
     add_argument('--pitfall_treasure_type', type=str, default='none', help='How to include treasures in the cell description of Pitfall: none (don\'t include treasures), count (include treasure count), score (include sum of positive rewards) or location (include the specific location the treasures were found).')
 
+    current_group = parser.add_argument_group('Atari No Domain Knowledge')
+    boolarg('--use_real_pos', neg=['--state_is_pixels', '--pix'], default=True, help='If this is on, the state will be resized pixels, not human prior.')
+    add_argument('--resize_x', '--rx', type=int, default=11, help='What to resize the pixels to in the x direction for use as a state.')
+    add_argument('--resize_y', '--ry', type=int, default=8, help='What to resize the pixels to in the y direction for use as a state.')
+    add_argument('--max_pix_value', '--mpv', type=int, default=8, help='The range of pixel values when resizing will be rescaled to from 0 to this value. Lower means fewer possible states in states_is_pixels.')
+    add_argument('--resize_shape', type=str, default=None, help='Shortcut for passing --resize_x (0), --resize_y (1) and --max_pix_value (2) all at the same time: 0x1x2')
+
+    boolarg('--dynamic_state', help='Dynamic downscaling of states. Ignores --resize_x, --resize_y, --max_pix_value and --resize_shape.')
+
+    add_argument('--first_compute_dynamic_state', type=int, default=100_000, help='Number of steps before recomputing the dynamic state representation (ignored if negative).')
+    add_argument('--first_compute_archive_size', type=int, default=10_000, help='Number of steps before recomputing the dynamic state representation (ignored if negative).')
+    add_argument('--recompute_dynamic_state_every', type=int, default=5_000_000, help='Number of steps before recomputing the dynamic state representation (ignored if negative).')
+    add_argument('--max_archive_size', type=int, default=1_000_000_000, help='Number of steps before recomputing the dynamic state representation (ignored if negative).')
+
+    add_argument('--cell_split_factor', type=float, default=0.03, help='The factor by which we try to split frames when recomputing the representation. 1 -> each frame is its own cell. 0 -> all frames are in the same cell.')
+    add_argument('--split_iterations', type=int, default=100, help='The number of iterations when recomputing the representation. A higher number means a more accurate (but less stochastic) results, and a lower number means a more stochastic and less accurate result. Note that stochasticity can be a good thing here as it makes it harder to get stuck.')
+    add_argument('--max_recent_frames', type=int, default=5_000, help='The number of recent frames to use in recomputing the representation. A higher number means slower recomputation but more accuracy, a lower number is faster and more stochastic.')
+    add_argument('--recent_frame_add_prob', type=float, default=0.1, help='The probability for a frame to be added to the list of recent frames.')
+
+    current_group = parser.add_argument_group('OpenAI Robotics')
+    add_argument('--interval_size', type=float, default=0.1, help='The interval size for robotics envs.')
+
+    current_group = parser.add_argument_group('Fetch Robotics')
+    add_argument('--fetch_type', type=str, default='boxes', help='The type of fetch environment (boxes, cubes, objects...)')
+    add_argument('--nsubsteps', type=int, default=20, help='The number of substeps in mujoco between each action (each substep takes 0.002 seconds).')
+    add_argument('--target_location', type=str, default=None, help='The target location for fetch envs.')
+    add_argument('--min_grip_score', type=int, default=0, help='The minimum grip score (inclusive) for a fetch grip to be included in the archive.\n0: at least 1 finger touching, 1: 2 fingers touching, 3: 2 fingers touching AND not touching the table (gripping and lifting).')
+    add_argument('--max_grip_score', type=int, default=3, help='The maximum grip score (inclusive). All grips with higher scores will be given this score instead.')
+    add_argument('--minmax_grip_score', type=str, default=None, help='Shortcut to set both the min and max grip score. The first digit is the min and second is the max.')
+    add_argument('--door_resolution', type=float, default=0.2, help='Number by which to divide the door distance.')
+    old_group = current_group
+    # current_group = current_group.add_mutually_exclusive_group()
+    add_argument('--timestep', type=float, default=0.002, help='The size of a mujoco timestep.')
+    add_argument('--total_timestep', type=float, default=None, help='The total timestep length (if included, timestep is ignored from the command line and instead set to total_timestep / nsubsteps). A reasonable value is 0.08')
+    current_group = old_group
+    add_argument('--door_offset', type=float, default=None, help='Number to add to the door distance before dividing.')
+    add_argument('--gripper_pos_resolution', type=float, default=0.5, help='Number by which to divide the gripper position.')
+    add_argument('--door_weight', type=float, default=1.0, help='Weight of different door positions.')
+    add_argument('--grip_weight', type=float, default=1.0, help='Weight of different grip positions.')
+    boolarg('--fetch_uniform', help='Select uniformly for fetch. Shurtcut for --door_weight=0 --grip_weight=0 --low_level_weight=1.')
+    boolarg('--conflate_objects', help='Conflate objects when getting their positions. With this, there is no difference between object 1 being in shelf 0001 and object 2 being in shelf 0001.')
+    boolarg('--target_single_shelf', help='As soon as a shelf is reached, only target that one shelf going forward.')
+    boolarg('--fetch_ordered', help='Whether to put objects in the shelves in a specific order or not.')
+    boolarg('--combine_table_shelf_box', help='Combine the table and shelf box for determining death by being outside the table-shelf box.')
+    boolarg('--fetch_force_closed_doors', help='Only give rewards for fetch if the doors are closed.')
+    boolarg('--fetch_single_cell', help='Only one cell when doing fetch.', default=False)
+
     current_group = parser.add_argument_group('Performance')
     add_argument('--n_cpus', type=int, default=None, help='Number of worker threads to spawn')
     add_argument('--pool_class', type=str, default='loky', help='The multiprocessing pool class (py or torch or loky).')
@@ -497,6 +552,8 @@ if __name__ == '__main__':
     boolarg('--profile', help='Whether or not to enable a profiler.')
 
     args = parser.parse_args()
+    if args.door_offset is None:
+        args.door_offset = args.door_resolution - 0.005
     if args.seed is not None:
         random.seed(args.seed)
         np.random.seed(args.seed + 1)
@@ -504,6 +561,17 @@ if __name__ == '__main__':
     if args.total_timestep is not None:
         args.timestep = args.total_timestep / args.nsubsteps
     del args.total_timestep
+
+    if args.fetch_uniform:
+        args.door_weight = 0
+        args.grip_weight = 0
+        args.low_level_weight = 1
+    del args.fetch_uniform
+
+    if args.minmax_grip_score:
+        args.min_grip_score = int(args.minmax_grip_score[0])
+        args.max_grip_score = int(args.minmax_grip_score[1])
+    del args.minmax_grip_score
 
     if args.resize_shape:
         x, y, p = args.resize_shape.split('x')
