@@ -65,20 +65,7 @@ def _run(
     perf_process = multiprocessing.Process(target=track_performance, args=(goexplore_py.goexplore.perf_array, 1, 0.1))
     perf_process.start()
 
-    if 'robot' in args.game:
-        if args.explorer_type == 'drift':
-            explorer = RandomDriftExplorerRobot(args.repeat_action)
-        else:
-            explorer = RepeatedRandomExplorerRobot(args.repeat_action)
-    elif 'fetch' in args.game:
-        if args.explorer_type == 'drift':
-            explorer = RandomDriftExplorerFetch(args.repeat_action)
-        else:
-            explorer = RepeatedRandomExplorerFetch(args.repeat_action)
-    elif args.explorer_type == 'repeated':
-        explorer = RepeatedRandomExplorer(args.repeat_action)
-    else:
-        explorer = RandomExplorer()
+    explorer = RandomExplorer()
 
     if args.use_real_pos:
         args.target_shape = None
@@ -104,97 +91,6 @@ def _run(
             GridDimension('level', 1), GridDimension('score', 1), GridDimension('room', 1),
             GridDimension('x', args.resolution), GridDimension('y', args.resolution)
         )
-    elif args.game == 'pitfall':
-        game_class = pitfall_env.MyPitfall
-        game_class.TARGET_SHAPE = args.target_shape
-        game_class.MAX_PIX_VALUE = args.max_pix_value
-        game_args = dict(x_repeat=args.x_repeat, treasure_type=args.pitfall_treasure_type)
-        IMPORTANT_ATTRS = ['score']
-        grid_resolution = (
-            GridDimension('level', 1), GridDimension('score', 1), GridDimension('room', 1),
-            GridDimension('x', args.resolution), GridDimension('y', args.resolution)
-        )
-    elif 'generic' in args.game:
-        if len(args.game.split('_')) > 2:
-            resize_shape = args.game.split('_')[2]
-            x, y, p = resize_shape.split('x')
-            target_shape = (int(x), int(y))
-            max_pix_value = int(p)
-
-        game_class = generic_atari_env.MyAtari
-        game_class.TARGET_SHAPE = args.target_shape
-        game_class.MAX_PIX_VALUE = args.max_pix_value
-        game_args = dict(name=args.game.split('_')[1])
-        grid_resolution = (
-            GridDimension('level', 1), GridDimension('score', 1), GridDimension('room', 1),
-            GridDimension('x', args.resolution), GridDimension('y', args.resolution)
-        )
-    elif 'robot' in args.game:
-        game_class = generic_goal_conditioned_env.MyRobot
-        game_args = dict(env_name=args.game.split('_')[1], interval_size=args.interval_size, seed_low=args.seed, seed_high=args.seed)
-        grid_resolution = (
-            GridDimension('level', 1), GridDimension('score', 1), GridDimension('room', 1),
-            GridDimension('x', args.resolution), GridDimension('y', args.resolution)
-        )
-    elif 'fetch' in args.game:
-        game_class = complex_fetch_env.MyComplexFetchEnv
-
-        model_file = f'teleOp_{args.fetch_type}.xml'
-
-        if args.target_location == 'None':
-            args.target_location = None
-
-        game_args = dict(
-            nsubsteps=args.nsubsteps,
-            min_grip_score=args.min_grip_score,
-            max_grip_score=args.max_grip_score,
-            model_file=model_file,
-            target_single_shelf=args.target_single_shelf,
-            combine_table_shelf_box=args.combine_table_shelf_box,
-            ordered_grip=args.fetch_ordered,
-            target_location=args.target_location,
-            timestep=args.timestep,
-            force_closed_doors=args.fetch_force_closed_doors
-        )
-
-        door1_dists_ignore = GridDimension('door1_dists', 1000, 500)
-        door1_dists_use = GridDimension('door1_dists', args.door_resolution, args.door_offset)
-        if args.target_location == '0010' or (args.target_location is None and not args.target_single_shelf):  # Lower door
-            door1_dists = door1_dists_use
-        elif args.target_single_shelf:
-            door1_dists = FetchConditionalObject(
-                '0010', door1_dists_use, door1_dists_ignore
-            )
-        else:
-            door1_dists = door1_dists_ignore
-
-
-        door_dists_ignore = GridDimension('door_dists', 1000, 500)
-        door_dists_use = GridDimension('door_dists', args.door_resolution, args.door_offset)
-        if args.target_location == '0001' or (args.target_location is None and not args.target_single_shelf):  # Lower door
-            door_dists = door_dists_use
-        elif args.target_single_shelf:
-            door_dists = FetchConditionalObject(
-                '0001', door_dists_use, door_dists_ignore
-            )
-        else:
-            door_dists = door_dists_ignore
-
-        target_grid = GridDimension('object_pos', 1, sort=args.conflate_objects)
-        if args.target_location is not None:
-            target_grid = GridEquality('object_pos', args.target_location, sort=args.conflate_objects)
-
-        grid_resolution = (
-            door_dists, door1_dists,
-            GridDimension('gripped_info', 1), GridDimension('gripped_pos', 1000, 500),
-            target_grid, GridDimension('gripper_pos', args.gripper_pos_resolution)
-        )
-        if args.fetch_single_cell:
-            grid_resolution = (
-                SingleCell('door_dists', (0,)), SingleCell('door1_dists', (0,)), SingleCell('gripped_info', None),
-                SingleCell('gripped_pos', None), SingleCell('object_pos', None), SingleCell('gripper_pos', None)
-            )
-        IMPORTANT_ATTRS = ['door_dists', 'door1_dists', 'gripped_info', 'object_pos']
     else:
         raise NotImplementedError("Unknown game: " + args.game)
 
