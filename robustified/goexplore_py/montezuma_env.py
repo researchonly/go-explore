@@ -258,6 +258,31 @@ class MyMontezuma:
     def get_face_pixels(self, unprocessed_state):
         return set(zip(*np.where(unprocessed_state[50:, :, 0] == 228)))
 
+    def is_pixel_death(self, unprocessed_state, face_pixels):
+        # There are no face pixels and yet we are not in a transition screen. We
+        # must be dead!
+        if len(face_pixels) == 0:
+            # All of the screen except the bottom is black: this is not a death but a
+            # room transition. Ignore.
+            if self.is_transition_screen(unprocessed_state):
+                return False
+            return True
+
+        # We already checked for the presence of no face pixels, however,
+        # sometimes we can die and still have face pixels. In those cases,
+        # the face pixels will be DISCONNECTED.
+        for pixel in face_pixels:
+            for neighbor in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                if (pixel[0] + neighbor[0], pixel[1] + neighbor[1]) in face_pixels:
+                    return False
+
+        return True
+
+    def is_ram_death(self):
+        if self.ram[58] > self.cur_lives:
+            self.cur_lives = self.ram[58]
+        return self.ram[55] != 0 or self.ram[58] < self.cur_lives
+
     def step(self, action) -> typing.Tuple[np.ndarray, float, bool, dict]:
         unprocessed_state, reward, done, lol = self.env.step(action)
         self.state.append(convert_state(unprocessed_state))
@@ -266,6 +291,35 @@ class MyMontezuma:
         self.cur_steps += 1
 
         face_pixels = self.get_face_pixels(unprocessed_state)
+        pixel_death = self.is_pixel_death(unprocessed_state, face_pixels)
+        ram_death = self.is_ram_death()
+        # TODO: remove all this stuff
+        if self.check_death and pixel_death:
+            if not ram_death:
+                print('Image-detected death. Check it!', self.ram[55], self.ram[58])
+                plt.imshow(unprocessed_state[50:, :, :])
+                print(np.sum(unprocessed_state[51:, :, :] == 0), unprocessed_state[50:].size)
+                plt.show()
+                print(np.where(unprocessed_state[:, :, 0] == 228))
+                plt.imshow(unprocessed_state[:, :, 0] == 228)
+                plt.show()
+                print(Counter(list(zip(unprocessed_state[51:, :, 0].flatten(), unprocessed_state[51:, :, 1].flatten(),
+                                       unprocessed_state[51:, :, 2].flatten()))))
+            done = True
+        elif self.check_death and not pixel_death and ram_death:
+            if self.ram_death_state == -1:
+                self.ram_death_state = self.cur_steps
+            if self.cur_steps - self.ram_death_state > 0 and not self.ignore_ram_death:
+                print('OMG, undetected death!!!')
+                self.ignore_ram_death = True
+                plt.imshow(unprocessed_state)
+                plt.show()
+                plt.imshow(unprocessed_state[:, :, 0] == 228)
+                plt.show()
+                print(np.where(unprocessed_state[:, :, 0] == 228))
+                print(self.ram)
+                print(Counter(list(zip(unprocessed_state[:, :, 0].flatten(), unprocessed_state[:, :, 1].flatten(),
+                                       unprocessed_state[:, :, 2].flatten()))))
 
         self.cur_score += reward
         self.pos = self.pos_from_unprocessed_state(face_pixels, unprocessed_state)
