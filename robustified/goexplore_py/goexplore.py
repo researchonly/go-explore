@@ -102,22 +102,6 @@ class Discretizer:
         return self.apply_scalar(obj)
 
 
-class FetchConditionalObject:
-    def __init__(self, object_pos, ifinpos, ifnotinpos):
-        self.object_pos = object_pos
-        self.ifinpos = ifinpos
-        self.ifnotinpos = ifnotinpos
-
-        assert self.ifinpos.attr == self.ifnotinpos.attr
-        self.attr = self.ifinpos.attr
-
-    def apply(self, obj):
-        if set(obj.object_pos) == set(['0000']) or self.object_pos in obj.object_pos:
-            return self.ifinpos.apply(obj)
-        else:
-            return self.ifnotinpos.apply(obj)
-
-
 class GridDimension(Discretizer):
     def __init__(self, attr, div, offset=0, sort=False):
         super().__init__(attr, sort=sort)
@@ -133,35 +117,6 @@ class GridDimension(Discretizer):
 
     def __repr__(self):
         return f'GridDimension("{self.attr}", {self.div}, {self.offset})'
-
-class SingleCell(Discretizer):
-    def __init__(self, attr, value, sort=False):
-        super().__init__(attr, sort=sort)
-        self.value = value
-
-    def apply(self, value):
-        return self.value
-
-
-class GridEquality(Discretizer):
-    def __init__(self, attr, value, sort=False):
-        super().__init__(attr, sort=sort)
-        self.value = value
-
-    def apply_scalar(self, scalar):
-        return int(scalar == self.value)
-
-    def __repr__(self):
-        return f'GridEquality("{self.attr}", {self.value})'
-
-
-class GridLambda(Discretizer):
-    def __init__(self, attr, fn, sort=False):
-        super().__init__(attr, sort=sort)
-        self.fn = fn
-
-    def apply_scalar(self, scalar):
-        return self.fn(scalar)
 
 
 class Cell:

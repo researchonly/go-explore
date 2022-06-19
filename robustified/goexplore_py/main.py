@@ -394,14 +394,7 @@ def run(base_path, args):
         os._exit(1)
 
 if __name__ == '__main__':
-    if os.path.exists('/home/udocker/deeplearning_goexplore_adrienle/'):
-        os.makedirs('/mnt/phx4', exist_ok=True)
-        os.system('/opt/michelangelo/mount.nfs -n -o nolock qstore1-phx4:/share /mnt/phx4')
-
-    if platform == "darwin":
-        # Circumvents the following issue on Mac OS:
-        # https://github.com/opencv/opencv/issues/5150
-        cv2.setNumThreads(0)
+    
     parser = argparse.ArgumentParser()
 
     current_group = parser
