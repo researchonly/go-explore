@@ -63,6 +63,7 @@ def _run(
     perf_process.start()
 
     explorer = RandomExplorer()
+    # explorer = RepeatedRandomExplorer(mean_repeat=20)
 
     if args.use_real_pos:
         args.target_shape = None
@@ -394,6 +395,11 @@ def run(base_path, args):
         os._exit(1)
 
 if __name__ == '__main__':
+
+    if platform == "darwin":
+        # Circumvents the following issue on Mac OS:
+        # https://github.com/opencv/opencv/issues/5150
+        cv2.setNumThreads(0)
     
     parser = argparse.ArgumentParser()
 

@@ -194,7 +194,10 @@ class WeightedSelector:
 
     def get_pos_weight(self, pos, cell, known_cells, possible_scores):
         if isinstance(pos, tuple):
-            # Logic for the score stuff: the highest score will get a weight of 1, second highest a weight of sqrt(1/2), third sqrt(1/3) etc.
+            # Logic for the score stuff: 
+            # the highest score will get a weight of 1, 
+            # second highest a weight of sqrt(1/2), 
+            # third sqrt(1/3) etc.
             return self.dir_weights.score_high * 1 / np.sqrt(len(possible_scores) - possible_scores.index(cell.score))
         elif pos not in self.cached_pos_weights:
             no_low = True

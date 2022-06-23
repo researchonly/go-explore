@@ -112,10 +112,8 @@ class MyMontezuma:
         self.unwrapped.seed(0)
         self.unprocessed_state = unprocessed_state
         self.state = []
-        self.ram_death_state = -1
         self.x_repeat = x_repeat
         self.cur_lives = 5
-        self.ignore_ram_death = False
         self.objects_from_pixels = objects_from_pixels
         self.objects_remember_rooms = objects_remember_rooms
         self.only_keys = only_keys
@@ -130,7 +128,6 @@ class MyMontezuma:
         self.ram = self.env.unwrapped.ale.getRAM()
         self.cur_score = 0
         self.cur_steps = 0
-        self.ram_death_state = -1
         self.pos = None
         self.pos = self.pos_from_unprocessed_state(self.get_face_pixels(unprocessed_state), unprocessed_state)
         if self.get_pos().room not in self.rooms:
@@ -224,15 +221,14 @@ class MyMontezuma:
             self.cur_steps,
             self.pos,
             self.room_time,
-            self.ram_death_state,
             self.score_objects,
             self.cur_lives
         )
 
     def restore(self, data):
-        (full_state, state, score, steps, pos, room_time, ram_death_state, self.score_objects, self.cur_lives) = data
+        (full_state, state, score, steps, pos, room_time, self.score_objects, self.cur_lives) = data
         self.state = copy.copy(state)
-
+        
         self.env._elapsed_steps = 0
         self.env._episode_started_at = time.time()
 
@@ -242,7 +238,6 @@ class MyMontezuma:
         self.cur_steps = steps
         self.pos = pos
         self.room_time = room_time
-        self.ram_death_state = ram_death_state
         return copy.copy(self.state)
 
     def is_transition_screen(self, unprocessed_state):
@@ -278,11 +273,6 @@ class MyMontezuma:
 
         return True
 
-    def is_ram_death(self):
-        if self.ram[58] > self.cur_lives:
-            self.cur_lives = self.ram[58]
-        return self.ram[55] != 0 or self.ram[58] < self.cur_lives
-
     def step(self, action) -> typing.Tuple[np.ndarray, float, bool, dict]:
         unprocessed_state, reward, done, lol = self.env.step(action)
         self.state.append(convert_state(unprocessed_state))
@@ -292,43 +282,19 @@ class MyMontezuma:
 
         face_pixels = self.get_face_pixels(unprocessed_state)
         pixel_death = self.is_pixel_death(unprocessed_state, face_pixels)
-        ram_death = self.is_ram_death()
-        # TODO: remove all this stuff
+
         if self.check_death and pixel_death:
-            if not ram_death:
-                print('Image-detected death. Check it!', self.ram[55], self.ram[58])
-                plt.imshow(unprocessed_state[50:, :, :])
-                print(np.sum(unprocessed_state[51:, :, :] == 0), unprocessed_state[50:].size)
-                plt.show()
-                print(np.where(unprocessed_state[:, :, 0] == 228))
-                plt.imshow(unprocessed_state[:, :, 0] == 228)
-                plt.show()
-                print(Counter(list(zip(unprocessed_state[51:, :, 0].flatten(), unprocessed_state[51:, :, 1].flatten(),
-                                       unprocessed_state[51:, :, 2].flatten()))))
             done = True
-        elif self.check_death and not pixel_death and ram_death:
-            if self.ram_death_state == -1:
-                self.ram_death_state = self.cur_steps
-            if self.cur_steps - self.ram_death_state > 0 and not self.ignore_ram_death:
-                print('OMG, undetected death!!!')
-                self.ignore_ram_death = True
-                plt.imshow(unprocessed_state)
-                plt.show()
-                plt.imshow(unprocessed_state[:, :, 0] == 228)
-                plt.show()
-                print(np.where(unprocessed_state[:, :, 0] == 228))
-                print(self.ram)
-                print(Counter(list(zip(unprocessed_state[:, :, 0].flatten(), unprocessed_state[:, :, 1].flatten(),
-                                       unprocessed_state[:, :, 2].flatten()))))
 
         self.cur_score += reward
         self.pos = self.pos_from_unprocessed_state(face_pixels, unprocessed_state)
         if self.pos.room != self.room_time[0]:
             self.room_time = (self.pos.room, 0)
         self.room_time = (self.pos.room, self.room_time[1] + 1)
-        if (self.pos.room not in self.rooms or
-                (self.room_time[1] == self.room_threshold and
-                 not self.rooms[self.pos.room][0])):
+        if (
+            self.pos.room not in self.rooms or 
+            (self.room_time[1] == self.room_threshold and not self.rooms[self.pos.room][0])
+        ):
             self.rooms[self.pos.room] = (
                 self.room_time[1] == self.room_threshold,
                 unprocessed_state[50:].repeat(self.x_repeat, axis=1)
