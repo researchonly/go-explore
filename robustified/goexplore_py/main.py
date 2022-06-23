@@ -70,17 +70,7 @@ def _run(
     else:
         raise NotImplementedError("Unknown game: " + args.game)
 
-    selector = WeightedSelector(game_class,
-                                seen=Weight(args.seen_weight, args.seen_power),
-                                chosen=Weight(args.chosen_weight, args.chosen_power),
-                                action=Weight(args.action_weight, args.action_power),
-                                room_cells=Weight(0.0),
-                                dir_weights=DirWeights(args.horiz_weight, args.vert_weight, args.low_score_weight, args.high_score_weight),
-                                chosen_since_new_weight=Weight(args.chosen_since_new_weight, args.chosen_since_new_power),
-                                low_level_weight=args.low_level_weight,
-                                grip_weight=args.grip_weight,
-                                door_weight=args.door_weight
-    )
+    selector = WeightedSelector(game_class)
 
     pool_cls = multiprocessing.get_context(args.start_method).Pool
     if args.pool_class == 'torch':
@@ -380,13 +370,6 @@ if __name__ == '__main__':
     add_argument('--chosen_since_new_power', '--csnp', type=float, default=0.5, help='The power of the "chosen since new" attribute in cell selection.')
     add_argument('--action_weight', '--aw', type=float, default=0.0, help='The weight of the "action" attribute in cell selection.')
     add_argument('--action_power', '--ap', type=float, default=0.5, help='The power of the "action" attribute in cell selection.')
-
-    current_group = parser.add_argument_group('Atari Selection Probability')
-    add_argument('--horiz_weight', '--hw', type=float, default=0.0, help='Weight of not having one of the two possible horizontal neighbors.')
-    add_argument('--vert_weight', '--vw', type=float, default=0.0, help='Weight of not having one of the two possible vertical neighbors.')
-    add_argument('--low_score_weight', type=float, default=0.0, help='Weight of not having a neighbor with a lower score/object number.')
-    add_argument('--high_score_weight', type=float, default=0.0, help='Weight of not having a neighbor with a higher score/object number.')
-    add_argument('--low_level_weight', type=float, default=1.0, help='Weight of cells in levels lower than the current max. If this is non-zero, lower levels will keep getting optimized, potentially leading to better solutions overall. Setting this to greater than 1 is possible but nonsensical since it means putting a larger weight on low levels than higher levels.')
 
     current_group = parser.add_argument_group('Atari Domain Knowledge')
     add_argument('--resolution', '--res', type=float, default=16, help='Length of the side of a grid cell.')

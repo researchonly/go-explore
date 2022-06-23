@@ -108,10 +108,8 @@ class GridDimension(Discretizer):
 
 
 class Cell:
-    def __init__(self, score=-infinity, seen_times=0, chosen_times=0,
-                 chosen_since_new=0, action_times=0, trajectory_len=infinity,
-                 restore=None, exact_pos=None, real_cell=None,
-                 cell_frame=None):
+    def __init__(self, score=-infinity, seen_times=0, chosen_times=0, 
+                 trajectory_len=infinity, restore=None, exact_pos=None, real_cell=None):
         self.score = score
 
         self.seen_times = seen_times
@@ -121,16 +119,14 @@ class Cell:
         self.restore = restore
         self.exact_pos = exact_pos
         self.real_cell = real_cell
-        self.cell_frame = cell_frame
 
 @dataclass
 class PosInfo:
-    __slots__ = ['exact', 'cell', 'state', 'restore', 'frame']
+    __slots__ = ['exact', 'cell', 'state', 'restore']
     exact: tuple
     cell: tuple
     state: typing.Any
     restore: typing.Any
-    frame: typing.Any
 
 
 @dataclass
@@ -204,12 +200,10 @@ class Explore:
         self.grid[cell_key].score = 0
         self.grid[cell_key].exact_pos = self.get_pos()
         self.grid[cell_key].real_cell = self.get_real_cell()
-        self.grid[cell_key].cell_frame = self.get_frame(True)
         # Create the DONE cell
         self.grid[DONE] = Cell()
         self.selector.cell_update(cell_key, self.grid[cell_key])
         self.selector.cell_update(DONE, self.grid[DONE])
-        self.real_grid = set()
         self.real_cell = None
 
     def make_env(self):
@@ -230,14 +224,6 @@ class Explore:
     def get_pos(self):
         return self.get_real_pos()
 
-    def get_frame(self, asbytes):
-        if not hasattr(ENV, 'state') or self.args.use_real_pos:
-            return None
-        frame = ENV.state[-1]
-        if asbytes:
-            return frame.tobytes()
-        return frame
-
     def get_real_pos(self):
         return ENV.get_pos()
 
@@ -247,7 +233,6 @@ class Explore:
             self.get_cell(),
             None,
             self.get_restore() if include_restore else None,
-            self.get_frame(True) if self.args.dynamic_state else None
         )
 
     def get_restore(self):
@@ -341,12 +326,11 @@ class Explore:
                                              len(ENV.rooms), self.env_info[0].TARGET_SHAPE,
                                              self.env_info[0].MAX_PIX_VALUE), 'args', enabled=(i == 0 and False)))
 
-
         # NB: save some of the attrs that won't be necessary but are very large, and set them to none instead,
         #     this way they won't be pickled.
         cache = {}
         to_save = [
-            'grid', 'real_grid', 'selector', 'pool_class'
+            'grid', 'selector', 'pool_class'
         ]
         for attr in to_save:
             cache[attr] = getattr(self, attr)
@@ -391,9 +375,6 @@ class Explore:
                 if elem.done:
                     potential_cell_key = DONE
 
-                if not self.args.use_real_pos:
-                    self.real_grid.add(elem.real_pos)
-
                 if potential_cell_key != old_potential_cell_key:
                     potential_cell = self.grid[potential_cell_key]
                     if potential_cell_key not in seen_cells:
@@ -401,15 +382,11 @@ class Explore:
                         potential_cell.seen_times += 1
                         self.selector.cell_update(potential_cell_key, potential_cell)
 
-                old_potential_cell_key = potential_cell_key
                 full_traj_len = cell_copy.trajectory_len + i + 1
                 cur_score += elem.reward
 
                 # Note: the DONE element should have a 0% chance of being selected, so OK to add the cell if it is in the DONE state.
                 if (elem.to.restore is not None or potential_cell_key == DONE) and self.should_accept_cell(potential_cell, cur_score, full_traj_len):
-                    if self.args.use_real_pos:
-                        self.real_grid.add(elem.real_pos)
-
                     cells_to_reset.add(potential_cell_key)
                     potential_cell.trajectory_len = full_traj_len
                     potential_cell.restore = elem.to.restore
@@ -420,7 +397,6 @@ class Explore:
                     potential_cell.real_cell = elem.real_pos
                     if self.args.use_real_pos:
                         potential_cell.exact_pos = elem.to.exact
-                    potential_cell.cell_frame = elem.to.frame
 
                     self.selector.cell_update(potential_cell_key, potential_cell)
 
