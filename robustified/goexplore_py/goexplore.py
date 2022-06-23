@@ -23,18 +23,6 @@ compress_kwargs = {}
 n_digits = 20
 DONE = None
 
-perf_array = None
-
-
-class MemInfo:
-    E_VIRT_USE_MEAN = 0
-    E_VIRT_USE_MAX = 1
-    E_VIRT_USE_CUR = 2
-    E_CPU_MEAN = 3
-    E_CPU_MAX = 4
-    E_CPU_CUR = 5
-    ARRAY_SIZE = 6
-
 
 class LPool:
     def __init__(self, n_cpus, maxtasksperchild=100):
@@ -122,90 +110,18 @@ class GridDimension(Discretizer):
 class Cell:
     def __init__(self, score=-infinity, seen_times=0, chosen_times=0,
                  chosen_since_new=0, action_times=0, trajectory_len=infinity,
-                 restore=None, exact_pos=None, real_cell=None, traj_last=None,
+                 restore=None, exact_pos=None, real_cell=None,
                  cell_frame=None):
         self.score = score
 
-        self._seen_times = seen_times
-        self._seen_times_diff = 0
-        self._chosen_times = chosen_times
-        self._chosen_times_diff = 0
-        self._chosen_since_new = chosen_since_new
-        self._chosen_since_new_diff = 0
-        self._action_times = action_times
-        self._action_times_diff = 0
+        self.seen_times = seen_times
+        self.chosen_times = chosen_times
 
         self.trajectory_len = trajectory_len
         self.restore = restore
         self.exact_pos = exact_pos
         self.real_cell = real_cell
-        self.traj_last = traj_last
         self.cell_frame = cell_frame
-
-    @property
-    def chosen_times(self):
-        return self._chosen_times
-
-    @property
-    def chosen_times_diff(self):
-        return self._chosen_times_diff
-
-    def inc_chosen_times(self, value):
-        self._chosen_times += value
-        self._chosen_times_diff += value
-
-    def set_chosen_times(self, value):
-        self._chosen_times = value
-        self._chosen_times_diff = value
-
-    @property
-    def seen_times(self):
-        return self._seen_times
-
-    @property
-    def seen_times_diff(self):
-        return self._seen_times_diff
-
-    def inc_seen_times(self, value):
-        self._seen_times += value
-        self._seen_times_diff += value
-
-    def set_seen_times(self, value):
-        self._seen_times = value
-        self._seen_times_diff = value
-
-    @property
-    def chosen_since_new(self):
-        return self._chosen_since_new
-
-    @property
-    def chosen_since_new_diff(self):
-        return self._chosen_since_new_diff
-
-    def inc_chosen_since_new(self, value):
-        self._chosen_since_new += value
-        self._chosen_since_new_diff += value
-
-    def set_chosen_since_new(self, value):
-        self._chosen_since_new = value
-        self._chosen_since_new_diff = value
-
-    @property
-    def action_times(self):
-        return self._action_times
-
-    @property
-    def action_times_diff(self):
-        return self._action_times_diff
-
-    def inc_action_times(self, value):
-        self._action_times += value
-        self._action_times_diff += value
-
-    def set_action_times(self, value):
-        self._action_times = value
-        self._action_times_diff = value
-
 
 @dataclass
 class PosInfo:
@@ -229,34 +145,6 @@ class TrajectoryElement:
 
 Experience = tuple
 
-# ### Main
-
-class RotatingSet:
-    def __init__(self, M):
-        self.max_size = M
-        self.clear()
-
-    def clear(self):
-        self.set = set()
-        self.list = collections.deque(maxlen=self.max_size)
-
-    def add(self, e):
-        if e in self.set:
-            return
-        if len(self.list) == self.max_size:
-            self.set.remove(self.list[0])
-        self.list.append(e)
-        self.set.add(e)
-        assert len(self.list) == len(self.set)
-
-    def __iter__(self):
-        for e in self.list:
-            yield e
-
-    def __len__(self):
-        return len(self.list)
-
-
 POOL = None
 ENV = None
 
@@ -272,37 +160,6 @@ def get_downscale(args):
 @functools.lru_cache(maxsize=1)
 def get_saved_grid(file):
     return pickle.load(compress.open(file, 'rb'))
-
-class FormerGrids:
-    def __init__(self, args):
-        self.args = args
-        self.cur_length = 0
-
-    def _getfilename(self, i):
-        return f'{self.args.base_path}/__grid_{i}.pickle{compress_suffix}'
-
-    def append(self, elem):
-        filename = self._getfilename(self.cur_length)
-        assert not os.path.exists(filename)
-        fastdump(elem, compress.open(filename, 'wb'))
-        self.cur_length += 1
-
-    def pop(self):
-        assert self.cur_length >= 1
-        filename = self._getfilename(self.cur_length - 1)
-        res = get_saved_grid(filename)
-        os.remove(filename)
-        self.cur_length -= 1
-        return res
-
-    def __getitem__(self, item):
-        if item < 0:
-            item = self.cur_length + item
-        return get_saved_grid(self._getfilename(item))
-
-    def __len__(self):
-        return self.cur_length
-
 
 
 class Explore:
@@ -334,16 +191,8 @@ class Explore:
         self.grid = defaultdict(Cell)
         self.frames_true = 0
         self.frames_compute = 0
-        self.start = None
         self.cycles = 0
-        self.seen_level_1 = False
-        self.dynamic_state_split_rules = (None, None, {})
-        self.dynamic_state_frame_sets = defaultdict(set)
-        self.random_recent_frames = RotatingSet(self.args.max_recent_frames)
-        self.last_recompute_dynamic_state = -self.args.recompute_dynamic_state_every + self.args.first_compute_dynamic_state
-
         self.max_score = 0
-        self.prev_len_grid = 0
 
         self.state = None
         self.reset()
@@ -355,30 +204,13 @@ class Explore:
         self.grid[cell_key].score = 0
         self.grid[cell_key].exact_pos = self.get_pos()
         self.grid[cell_key].real_cell = self.get_real_cell()
-        self.grid[cell_key].traj_last = 0
         self.grid[cell_key].cell_frame = self.get_frame(True)
         # Create the DONE cell
         self.grid[DONE] = Cell()
         self.selector.cell_update(cell_key, self.grid[cell_key])
         self.selector.cell_update(DONE, self.grid[DONE])
         self.real_grid = set()
-        self.pos_cache = None
-        self.former_grids = FormerGrids(args)
-        self.former_grids.append(copy.deepcopy(self.grid))
-
-        self.cur_experience = 1
-        self.experience_prev_ids = [None]
-        self.experience_actions = [None]
-        self.experience_cells = [None]
-        self.experience_rewards = [0]
-        self.experience_scores = [0]
-        self.experience_lens = [0]
-
-        self.last_added_cell = 0
-
         self.real_cell = None
-
-        self.gripped_info_count = {}
 
     def make_env(self):
         global ENV
@@ -388,35 +220,12 @@ class Explore:
 
     def reset(self):
         self.real_cell = None
-        self.pos_cache = None
         self.make_env()
         return ENV.reset()
 
     def step(self, action):
         self.real_cell = None
-        self.pos_cache = None
         return ENV.step(action)
-
-    def get_dynamic_repr(self, orig_state):
-        if isinstance(orig_state, bytes):
-            orig_state = RLEArray.frombytes(orig_state, dtype=np.uint8)
-        orig_state = orig_state.to_np()
-        dynamic_repr = []
-
-        target_size, max_pix_val, cur_split_rules = self.dynamic_state_split_rules
-
-        while True:
-            if target_size is None:
-                dynamic_repr.append(random.randint(1, self.args.first_compute_archive_size))
-            else:
-                state = imdownscale(orig_state, target_size, max_pix_val)
-                dynamic_repr.append(state.tobytes())
-            if dynamic_repr[-1] in cur_split_rules:
-                target_size, max_pix_val, cur_split_rules = cur_split_rules[dynamic_repr[-1]]
-            else:
-                break
-
-        return tuple(dynamic_repr)
 
     def get_pos(self):
         return self.get_real_pos()
@@ -446,7 +255,6 @@ class Explore:
 
     def restore(self, val):
         self.real_cell = None
-        self.pos_cache = None
         self.make_env()
         ENV.restore(val)
 
@@ -510,71 +318,11 @@ class Explore:
 
         end_trajectory = self.run_seed(seed, max_steps=self.args.explore_steps)
 
-        # # We are not done, check that doing nothing for self.args.ignore_death steps won't kill us.
-        if self.args.ignore_death > 0:
-            if not end_trajectory[-1].done:
-                assert self.args.ignore_death == 1
-                end_trajectory += self.run_explorer(DoNothingExplorer(), max_steps=self.args.ignore_death)
-
         known_room_data = {}
         if len(ENV.rooms) > known_rooms:
             known_room_data = ENV.rooms
 
         return TimedPickle((cell_key, end_trajectory, self.frames_true, self.frames_compute, known_room_data), 'ret', enabled=info.enabled)
-
-    def sample_only_cycle(self):
-        # Choose a bunch of cells, send them to the workers for processing, then combine the results.
-        # A lot of what this function does is only aimed at minimizing the amount of data that needs
-        # to be pickled to the workers, which is why it sets a lot of variables to None only to restore
-        # them later.
-        global POOL
-        chosen_cells = []
-        cell_keys = self.selector.choose_cell(self.grid, size=self.args.batch_size)
-        for i, cell_key in enumerate(cell_keys):
-            cell_copy = self.grid[cell_key]
-            seed = random.randint(0, 2 ** 31)
-            chosen_cells.append(TimedPickle((cell_key, cell_copy, seed,
-                                             len(ENV.rooms), self.env_info[0].TARGET_SHAPE,
-                                             self.env_info[0].MAX_PIX_VALUE), 'args', enabled=(i == 0 and False)))
-
-
-        # NB: save some of the attrs that won't be necessary but are very large, and set them to none instead,
-        #     this way they won't be pickled.
-        cache = {}
-        to_save = [
-            'grid', 'real_grid', 'former_grids', 'experience_prev_ids', 'experience_actions', 'experience_cells', 'experience_rewards', 'experience_scores', 'experience_lens',
-            'selector', 'dynamic_state_frame_sets',  'random_recent_frames', 'pool_class'
-        ]
-        for attr in to_save:
-            cache[attr] = getattr(self, attr)
-            setattr(self, attr, None)
-
-        trajectories = [e.data for e in POOL.map(self.process_cell, chosen_cells)]
-        if self.args.reset_pool and (self.cycles + 1) % 100 == 0:
-            POOL.close()
-            POOL.join()
-            POOL = None
-            gc.collect()
-            POOL = self.pool_class(self.args.n_cpus)
-        chosen_cells = [e.data for e in chosen_cells]
-
-        for attr, v in cache.items():
-            setattr(self, attr, v)
-
-        # Note: we do this now because starting here we're going to be concatenating the trajectories
-        # of these cells, and they need to remain the same!
-        chosen_cells = [(k, copy.copy(c), s, n, shape, pix) for k, c, s, n, shape, pix in chosen_cells]
-
-        for ((cell_key, cell_copy, seed, _, _, _), (_, end_trajectory, ft, fc, known_rooms)) in zip(chosen_cells,
-                                                                                                  trajectories):
-
-            for i, elem in enumerate(end_trajectory):
-                if i == len(end_trajectory) - self.args.ignore_death:
-                    break
-
-                if not elem.done:
-                    if elem.to.frame is not None and (random.random() < self.args.recent_frame_add_prob):
-                        self.random_recent_frames.add(elem.to.frame)
 
     def run_cycle(self):
         # Choose a bunch of cells, send them to the workers for processing, then combine the results.
@@ -582,8 +330,6 @@ class Explore:
         # to be pickled to the workers, which is why it sets a lot of variables to None only to restore
         # them later.
         global POOL
-        if self.start is None:
-            self.start = time.time()
         
         self.cycles += 1
         chosen_cells = []
@@ -600,8 +346,7 @@ class Explore:
         #     this way they won't be pickled.
         cache = {}
         to_save = [
-            'grid', 'real_grid', 'former_grids', 'experience_prev_ids', 'experience_actions', 'experience_cells', 'experience_rewards', 'experience_scores', 'experience_lens',
-            'selector', 'dynamic_state_frame_sets',  'random_recent_frames', 'pool_class'
+            'grid', 'real_grid', 'selector', 'pool_class'
         ]
         for attr in to_save:
             cache[attr] = getattr(self, attr)
@@ -618,7 +363,7 @@ class Explore:
 
         for attr, v in cache.items():
             setattr(self, attr, v)
-
+        
         # Note: we do this now because starting here we're going to be concatenating the trajectories
         # of these cells, and they need to remain the same!
         chosen_cells = [(k, copy.copy(c), s, n, shape, pix) for k, c, s, n, shape, pix in chosen_cells]
@@ -635,69 +380,36 @@ class Explore:
                     ENV.rooms[k] = known_rooms[k]
 
             start_cell = self.grid[cell_key]
-            start_cell.inc_chosen_times(1)
-            start_cell.inc_chosen_since_new(1)
-            start_cell.inc_seen_times(1)
+            start_cell.chosen_times += 1
+            start_cell.seen_times += 1
             self.selector.cell_update(cell_key, start_cell)
             cur_score = cell_copy.score
-            prev_id = cell_copy.traj_last
             potential_cell = start_cell
             old_potential_cell_key = cell_key
             for i, elem in enumerate(end_trajectory):
-                self.experience_prev_ids.append(self.cur_experience - prev_id)
-                self.experience_actions.append(elem.action)
-                possible_experience_cell = (self.dynamic_state_split_rules, (DONE if elem.done else elem.to.cell))
-                if not self.args.save_cells and not elem.done:
-                    possible_experience_cell = 1
-                if len(self.experience_cells) > 0 and self.experience_cells[-1] == possible_experience_cell:
-                    self.experience_cells[-1] = 0
-                self.experience_cells.append(possible_experience_cell)
-                self.experience_rewards.append(elem.reward)
-                self.experience_scores.append(elem.reward + cur_score)
-                self.experience_lens.append(cell_copy.trajectory_len + i + 1)
-                prev_id = self.cur_experience
-                self.cur_experience += 1
-
-                if i == len(end_trajectory) - self.args.ignore_death:
-                    break
-
                 potential_cell_key = elem.to.cell
                 if elem.done:
                     potential_cell_key = DONE
-                else:
-                    if elem.to.frame is not None and (random.random() < self.args.recent_frame_add_prob): #or len(self.random_recent_frames) < self.random_recent_frames.max_size):
-                        self.random_recent_frames.add(elem.to.frame)
 
                 if not self.args.use_real_pos:
                     self.real_grid.add(elem.real_pos)
 
-                if not isinstance(potential_cell_key, tuple) and potential_cell_key != DONE and potential_cell_key.level > 0:
-                    self.seen_level_1 = True
-
-                was_in_grid = True
                 if potential_cell_key != old_potential_cell_key:
-                    was_in_grid = potential_cell_key in self.grid
                     potential_cell = self.grid[potential_cell_key]
                     if potential_cell_key not in seen_cells:
                         seen_cells.add(potential_cell_key)
-                        potential_cell.inc_seen_times(1)
-                        if was_in_grid:
-                            self.selector.cell_update(potential_cell_key, potential_cell)
-                        else:
-                            self.last_added_cell = self.frames_compute
+                        potential_cell.seen_times += 1
+                        self.selector.cell_update(potential_cell_key, potential_cell)
 
                 old_potential_cell_key = potential_cell_key
                 full_traj_len = cell_copy.trajectory_len + i + 1
                 cur_score += elem.reward
-
-                potential_cell.inc_action_times(1)
 
                 # Note: the DONE element should have a 0% chance of being selected, so OK to add the cell if it is in the DONE state.
                 if (elem.to.restore is not None or potential_cell_key == DONE) and self.should_accept_cell(potential_cell, cur_score, full_traj_len):
                     if self.args.use_real_pos:
                         self.real_grid.add(elem.real_pos)
 
-                    start_cell.set_chosen_since_new(0)
                     cells_to_reset.add(potential_cell_key)
                     potential_cell.trajectory_len = full_traj_len
                     potential_cell.restore = elem.to.restore
@@ -708,17 +420,14 @@ class Explore:
                     potential_cell.real_cell = elem.real_pos
                     if self.args.use_real_pos:
                         potential_cell.exact_pos = elem.to.exact
-                    potential_cell.traj_last = self.cur_experience - 1
                     potential_cell.cell_frame = elem.to.frame
 
                     self.selector.cell_update(potential_cell_key, potential_cell)
 
         if self.args.reset_cell_on_update:
             for cell_key in cells_to_reset:
-                self.grid[cell_key].set_chosen_times(0)
-                self.grid[cell_key].set_chosen_since_new(0)
-                self.grid[cell_key].set_seen_times(0)
-                self.grid[cell_key].set_action_times(0)
+                self.grid[cell_key].chosen_times = 0
+                self.grid[cell_key].seen_times = 0
 
         return [(k) for k, c, s, n, shape, pix in chosen_cells], trajectories
 
@@ -730,108 +439,3 @@ class Explore:
                     (full_traj_len < potential_cell.trajectory_len and
                      cur_score == potential_cell.score))
         return full_traj_len < potential_cell.trajectory_len
-
-    def save_checkpoint(self, suffix=''):
-        # Quick bookkeeping, printing update
-        seen_level_1 = self.seen_level_1
-        filename = f'{self.args.base_path}/{self.frames_true:0{n_digits}}_{self.frames_compute:0{n_digits}}{suffix}'
-
-        def print_sorted_keys(items):
-            items = sorted(items.items(), key=lambda x: str(x[0]))
-            return f'{{{", ".join(str(k) + ": " + str(v) for k, v in items)}}}'
-
-        for attr in self.important_attrs:
-            tqdm.write(f'Cells at {attr}: {print_sorted_keys(Counter(getattr(e, attr) for e in self.real_grid))}')
-        tqdm.write(f'Max score: {max(e.score for e in self.grid.values())}')
-        tqdm.write(f'Compute cells: {len(self.grid)}')
-
-        # Save pictures
-        if self.args.save_pictures or self.args.save_item_pictures or self.args.save_prob_pictures:
-            # Show normal grid
-            if self.args.save_pictures or self.args.save_item_pictures:
-                get_env().render_with_known(
-                    list(self.real_grid), self.args.resolution,
-                    show=False, filename=filename + '.png',
-                    get_val=lambda x: 1,
-                    combine_val=lambda x, y: x + y
-                )
-
-            if not self.args.use_real_pos:
-                object_combinations = sorted(
-                    set(e.real_cell.score for e in self.grid.values() if e.real_cell is not None))
-                for obj in object_combinations:
-                    grid_at_obj = [e.real_cell for e in self.grid.values() if
-                                   e.real_cell is not None and e.real_cell.score == obj]
-                    get_env().render_with_known(
-                        grid_at_obj, self.args.resolution,
-                        show=False, filename=filename + f'_object_{obj}.png',
-                        get_val=lambda x: 1,
-                        combine_val=lambda x, y: x + y
-                    )
-
-            # Show probability grid
-            if (self.args.use_real_pos and self.args.save_pictures) or self.args.save_prob_pictures:
-                self.selector.set_ranges(list(self.grid.keys()))
-                possible_scores = sorted(set(e.score for e in self.grid))
-                total = np.sum(
-                    [self.selector.get_weight(x, self.grid[x], possible_scores, self.grid) for x in self.grid])
-                get_env().render_with_known(
-                    list(self.grid.keys()), self.args.resolution,
-                    show=False, filename=filename + '_prob.PNG',
-                    combine_val=lambda x, y: x + y,
-                    get_val=lambda x: self.selector.get_weight(x, self.grid[x], possible_scores,
-                                                               self.grid) / total,
-                )
-            if self.prev_checkpoint and self.args.clear_old_checkpoints:
-                if not self.args.keep_item_pictures:
-                    try:
-                        os.remove(self.prev_checkpoint + '.png')
-                    except FileNotFoundError:
-                        # If it doesn't exists, we don't need to remove it.
-                        pass
-                if self.args.use_real_pos and not self.args.keep_prob_pictures:
-                    try:
-                        os.remove(self.prev_checkpoint + '_prob.PNG')
-                    except FileNotFoundError:
-                        # If it doesn't exists, we don't need to remove it.
-                        pass
-
-        # Save checkpoints
-        grid_copy = {}
-        for k, v in self.grid.items():
-            grid_copy[k] = copy.copy(v)
-            grid_copy[k].cell_frame = None
-            grid_copy[k].restore = None
-        fastdump(grid_copy, compress.open(filename + compress_suffix, 'wb', **compress_kwargs))
-
-        # Clean up previous checkpoint.
-        if self.prev_checkpoint and self.prev_checkpoint != filename and self.args.clear_old_checkpoints:
-            os.remove(self.prev_checkpoint + compress_suffix)
-        self.prev_checkpoint = filename
-
-        # A much smaller file that should be sufficient for view folder, but not for restoring
-        # the demonstrations. Should make view folder much faster.
-        grid_set = {}
-        for k, v in self.grid.items():
-            grid_set[k] = v.score
-        fastdump(grid_set, compress.open(filename + '_set' + compress_suffix, 'wb', **compress_kwargs))
-        fastdump(self.real_grid, compress.open(filename + '_set_real' + compress_suffix, 'wb', **compress_kwargs))
-
-        print(self.gripped_info_count)
-        perf_info = {'gripped_info': self.gripped_info_count}
-        for e in dir(MemInfo):
-            if e[:2] == 'E_':
-                perf_info[e] = perf_array[getattr(MemInfo, e)]
-        fastdump(perf_info, compress.open(filename + '_perf' + compress_suffix, 'wb', **compress_kwargs))
-
-        fastdump(
-            (
-                self.experience_prev_ids, self.experience_actions, self.experience_rewards, self.experience_cells, self.experience_scores, self.experience_lens
-            ),
-            compress.open(filename + '_experience' + compress_suffix, 'wb', **compress_kwargs))
-        self.experience_prev_ids = []
-        self.experience_actions = []
-        self.experience_rewards = []
-        self.experience_cells = []
-        self.experience_scores = []
-        self.experience_lens = []

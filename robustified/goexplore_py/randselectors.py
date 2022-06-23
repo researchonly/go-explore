@@ -154,12 +154,6 @@ class WeightedSelector:
     def get_chosen_weight(self, cell):
         return self.compute_weight(cell.chosen_times, self.chosen)
 
-    def get_chosen_since_new_weight(self, cell):
-        return self.compute_weight(cell.chosen_since_new, self.chosen_since_new_weight)
-
-    def get_action_weight(self, cell):
-        return self.compute_weight(cell.action_times, self.action)
-
     def get_neighbor(self, pos, offset):
         x = pos.x + offset[0]
         y = pos.y + offset[1]
@@ -245,9 +239,7 @@ class WeightedSelector:
             return 0.0
         res = (self.get_pos_weight(cell_key, cell, known_cells, possible_scores) +
                self.get_seen_weight(cell) +
-               self.get_chosen_weight(cell) +
-               self.get_action_weight(cell) +
-               self.get_chosen_since_new_weight(cell)
+               self.get_chosen_weight(cell)
                ) * level_weight
         return res
 

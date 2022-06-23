@@ -35,32 +35,10 @@ MAX_SCORE = None
 
 PROFILER = None
 
-def track_performance(perf_array, sleep_time, exp_coef):
-    import time
-    import psutil
-    while True:
-        vmem = psutil.virtual_memory().used
-        cpu = psutil.cpu_percent()
-
-        perf_array[MemInfo.E_VIRT_USE_MEAN] = exp_coef * vmem + (1 - exp_coef) * perf_array[MemInfo.E_VIRT_USE_MEAN]
-        perf_array[MemInfo.E_CPU_MEAN] = exp_coef * cpu + (1 - exp_coef) * perf_array[MemInfo.E_CPU_MEAN]
-
-        perf_array[MemInfo.E_VIRT_USE_CUR] = vmem
-        perf_array[MemInfo.E_CPU_CUR] = cpu
-
-        perf_array[MemInfo.E_VIRT_USE_MAX] = max(vmem, perf_array[MemInfo.E_VIRT_USE_MAX])
-        perf_array[MemInfo.E_CPU_MAX] = max(cpu, perf_array[MemInfo.E_CPU_MAX])
-
-        time.sleep(sleep_time)
-
 def _run(
         base_path,
         args
         ):
-
-    goexplore_py.goexplore.perf_array = multiprocessing.Array('d', [0.0] * MemInfo.ARRAY_SIZE)
-    perf_process = multiprocessing.Process(target=track_performance, args=(goexplore_py.goexplore.perf_array, 1, 0.1))
-    perf_process.start()
 
     explorer = RandomExplorer()
     # explorer = RepeatedRandomExplorer(mean_repeat=20)
@@ -167,37 +145,11 @@ def _run(
 
         # Now we set all the relevent attributes
         expl.grid = pickle.load(bz2.open(f'{args.seed_path}/__grid_{grid_idx}.pickle.bz2', 'rb'))
-        expl.former_grids.cur_length = grid_idx
-        exp_data = pickle.load(bz2.open(last_recompute_exp))
-        # Note: expl.cycles cannot be set, this is probably ok because we don't generally use this value
-        # Note: expl.seen_level_1 could be set but not worth it because this is not intended for domain knowledge
-        # Note: expl.dynamic_state_frame_sets is unused
-        # Note: expl.last_recompute_dynamic_state probably can be left in its initial state. The only thing we want
-        #       is for the dynamic state to be recomputed immediately, which should happen.
         expl.max_score = max([e.score for e in expl.grid.values()])
-        # Note: expl.prev_len_grid is unused
-        # Note: expl.real_grid doesn't really matter except for domain knowledge, so ignoring here
-        # Note: expl.pos_cache can be ignored
-        # Note: expl.last_added_cell is set but not used, ignoring
-        # Note: expl.real_cell can be ignored
-        (
-            expl.experience_prev_ids, expl.experience_actions, expl.experience_rewards,
-            expl.experience_cells, expl.experience_scores, expl.experience_lens
-        ) = exp_data
-        expl.dynamic_state_split_rules = [
-            e[0] for e in expl.experience_cells
-            if isinstance(e, tuple)
-        ][-1]
 
         expl.selector.clear_all_cache()
         for k, v in expl.grid.items():
             expl.selector.cell_update(k, v)
-
-        with tqdm(desc='Sample Frames', total=args.max_recent_frames) as t_sample:
-            while len(expl.random_recent_frames) < args.max_recent_frames:
-                old = len(expl.random_recent_frames)
-                expl.sample_only_cycle()
-                t_sample.update(len(expl.random_recent_frames) - old)
 
     with tqdm(desc='Time (seconds)', smoothing=0, total=MAX_TIME) as t_time, \
             tqdm(desc='Iterations', total=MAX_ITERATIONS) as t_iter, \
@@ -210,9 +162,7 @@ def _run(
         t.update(expl.frames_true)
         start_time = time.time()
         last_time = np.round(start_time)
-        seen_level_1 = False
         n_iters = 0
-        prev_checkpoint = None
 
         def should_continue():
             if MAX_TIME is not None and time.time() - start_time >= MAX_TIME:
@@ -230,10 +180,10 @@ def _run(
             return True
 
         while should_continue():
+            print()
             # Run one iteration
             old = expl.frames_true
             old_compute = expl.frames_compute
-            old_len_grid = len(expl.grid)
             old_max_score = expl.max_score
 
             expl.run_cycle()
@@ -253,54 +203,6 @@ def _run(
             t_time.update(int(cur_time - last_time))
             last_time = cur_time
             n_iters += 1
-
-            # In some circumstances (see comments), save a checkpoint and some pictures
-            if ((not seen_level_1 and expl.seen_level_1) or  # We have solved level 1
-                    old == 0 or  # It is the first iteration
-                    old // THRESH_TRUE != expl.frames_true // THRESH_TRUE or  # We just passed the THRESH_TRUE threshold
-                    old_compute // THRESH_COMPUTE != expl.frames_compute // THRESH_COMPUTE or  # We just passed the THRESH_COMPUTE threshold
-                    not should_continue()):  # This is the last iteration
-
-                seen_level_1 = getattr(expl, 'seen_level_1', False)
-                expl.save_checkpoint()
-
-                if PROFILER:
-                    print("ITERATION:", n_iters)
-                    PROFILER.disable()
-                    PROFILER.dump_stats(filename + '.stats')
-                    PROFILER.enable()
-
-    perf_process.terminate()
-
-def display_top(snapshot, key_type='traceback', limit=20):
-    top_stats = snapshot.statistics(key_type)
-
-    tqdm.write("Top %s lines" % limit)
-    for index, stat in reversed(list(enumerate(top_stats[:limit], 1))):
-        frame = stat.traceback[0]
-        # replace "/path/to/module/file.py" with "module/file.py"
-        # filename = os.sep.join(frame.filename.split(os.sep)[-2:])
-        filename = frame.filename
-        tqdm.write("#%s: %s:%s: %.1f MB"
-              % (index, filename, frame.lineno, stat.size / (1024*1024)))
-        line = linecache.getline(frame.filename, frame.lineno).strip()
-
-        for frame in stat.traceback.format():
-            tqdm.write(str(frame))
-
-        if line:
-            tqdm.write('    %s' % line)
-
-        tqdm.write('\n')
-
-    other = top_stats[limit:]
-    if other:
-        size = sum(stat.size for stat in other)
-        tqdm.write("%s other: %.1f MB" % (len(other), size / (1024*1024)))
-    total = sum(stat.size for stat in top_stats)
-    tqdm.write('\n')
-    tqdm.write("Total allocated size: %.1f MB" % (total / (1024*1024)))
-    tqdm.write('\n')
 
 class Tee(object):
     def __init__(self, name, output):
@@ -438,7 +340,6 @@ if __name__ == '__main__':
     add_argument('--game', '-g', type=str, default='montezuma', help='Determines the game to which apply goexplore.')
     add_argument('--repeat_action', '--ra', type=float, default=20, help='The average number of times that actions will be repeated in the exploration phase.')
     add_argument('--explore_steps', type=int, default=100, help='Maximum number of steps in the explore phase.')
-    add_argument('--ignore_death', type=int, default=0, help='Number of steps immediately before death to ignore.')
     boolarg('--optimize_score', default=True, help='Optimize for score (only speed). Will use fewer "game frames" and come up with faster trajectories with lower scores. If not combined with --remember_rooms and --objects_from_ram is not enabled, things should run much slower.')
     add_argument('--prob_override', type=float, default=0.0, help='Probability that the newly found cells will randomly replace the current cell.')
     add_argument('--batch_size', type=int, default=100, help='Number of worker threads to spawn')
