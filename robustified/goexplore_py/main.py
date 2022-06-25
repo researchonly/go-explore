@@ -13,14 +13,6 @@ import sys
 from sys import platform
 from goexplore_py.randselectors import *
 from goexplore_py.goexplore import *
-import goexplore_py.goexplore
-import goexplore_py.montezuma_env as montezuma_env
-import goexplore_py.generic_atari_env as generic_atari_env
-import cProfile
-import gzip
-
-import tracemalloc, linecache
-
 
 VERSION = 1
 
@@ -33,12 +25,7 @@ MAX_TIME = 12 * 60 * 60
 MAX_CELLS = None
 MAX_SCORE = None
 
-PROFILER = None
-
-def _run(
-        base_path,
-        args
-        ):
+def _run(args):
 
     explorer = RandomExplorer()
     # explorer = RepeatedRandomExplorer(mean_repeat=20)
@@ -51,18 +38,11 @@ def _run(
         args.target_shape = (-1, -1)
         args.max_pix_value = -1
 
-    IMPORTANT_ATTRS = []
     if args.game == 'montezuma':
         game_class = MyMontezuma
         game_class.TARGET_SHAPE = args.target_shape
         game_class.MAX_PIX_VALUE = args.max_pix_value
-        game_args = dict(
-        score_objects=args.use_objects, x_repeat=args.x_repeat,
-        objects_from_pixels=args.objects_from_pixels,
-        objects_remember_rooms=args.remember_rooms,
-        only_keys=args.only_keys
-        )
-        IMPORTANT_ATTRS = ['level', 'score']
+        game_args = dict()
         grid_resolution = (
             GridDimension('level', 1), GridDimension('score', 1), GridDimension('room', 1),
             GridDimension('x', args.resolution), GridDimension('y', args.resolution)
@@ -73,12 +53,7 @@ def _run(
     selector = WeightedSelector(game_class)
 
     pool_cls = multiprocessing.get_context(args.start_method).Pool
-    if args.pool_class == 'torch':
-        pool_cls = torch.multiprocessing.Pool
-    elif args.pool_class == 'loky':
-        pool_cls = LPool
-    elif args.pool_class == 'sync':
-        pool_cls = SyncPool
+    pool_cls = LPool
 
     pool_cls = seed_pool_wrapper(pool_cls)
 
@@ -88,58 +63,8 @@ def _run(
         (game_class, game_args),
         grid_resolution,
         pool_class=pool_cls,
-        args=args,
-        important_attrs=IMPORTANT_ATTRS
+        args=args
     )
-
-    if args.seed_path is not None:
-        # First we check that the arguments match
-        orig_kwargs = json.load(open(args.seed_path + '/kwargs.json'))
-        new_kwargs = json.load(open(base_path + '/kwargs.json'))
-        for k in set(list(orig_kwargs.keys()) + list(new_kwargs.keys())):
-            # Note: we include seed_path because of course the original had a different seed_path,
-            # we include base_path for the same reason. code_hash is riskier but makes the assumption
-            # that the original may have crashed due to a non-performance affecting bug that was fixed
-            # in the new version. Seed is included because it technically doesn't make a difference
-            # if the new version is started with the same or a different seed.
-            if k in ('code_hash', 'seed', 'seed_path', 'base_path'):
-                continue
-            assert orig_kwargs.get(k) == new_kwargs.get(k)
-
-        # Now we find the SECOND TO LAST grid, which will be our starting point,
-        # as well as the maximum number of compute and game steps
-        # Note, very importantly, that we are resuming from the SECOND TO LAST: the
-        # reason is that we can't know for sure that the last one isn't buggy (because
-        # the original run might have crashed while creating it)
-        grid_idx = 0
-        while os.path.exists(f'{args.seed_path}/__grid_{grid_idx + 2}.pickle.bz2'):
-            grid_idx += 1
-        last_recompute_exp = sorted(glob.glob(f'{args.seed_path}/*pre_recompute_experience.bz2'))[grid_idx]
-        expl.frames_true, expl.frames_compute = [int(e) for e in last_recompute_exp.split('/')[-1].split('_')[:2]]
-
-        # Now we create links to all the files that precede the grid change
-        os.remove(f'{args.base_path}/__grid_0.pickle.bz2')
-        for e in tqdm(glob.glob(f'{args.seed_path}/*.bz2'), desc='symlinks'):
-            filename = e.split('/')[-1]
-            if 'thisisfake' in filename:
-                continue
-            if filename.startswith('__grid'):
-                idx = int(filename.split('_')[3].split('.')[0])
-                if idx < grid_idx:
-                    os.system(f'ln -s -r "{e}" "{base_path}/{filename}"')
-            else:
-                game_frames, compute_frames = [int(e.split('.')[0]) for e in filename.split('_')[:2]]
-                if game_frames < expl.frames_true:
-                    os.system(f'ln -s -r "{e}" "{base_path}/{filename}"')
-
-
-        # Now we set all the relevent attributes
-        expl.grid = pickle.load(bz2.open(f'{args.seed_path}/__grid_{grid_idx}.pickle.bz2', 'rb'))
-        expl.max_score = max([e.score for e in expl.grid.values()])
-
-        expl.selector.clear_all_cache()
-        for k, v in expl.grid.items():
-            expl.selector.cell_update(k, v)
 
     with tqdm(desc='Time (seconds)', smoothing=0, total=MAX_TIME) as t_time, \
             tqdm(desc='Iterations', total=MAX_ITERATIONS) as t_iter, \
@@ -170,7 +95,6 @@ def _run(
             return True
 
         while should_continue():
-            print()
             # Run one iteration
             old = expl.frames_true
             old_compute = expl.frames_compute
@@ -211,45 +135,6 @@ class Tee(object):
     
 def run(base_path, args):
     cur_id = 0
-    if os.path.exists(base_path):
-        current = glob.glob(base_path + '/*')
-        for c in current:
-            try:
-                idx, _ = c.split('/')[-1].split('_')
-                idx = int(idx)
-                if idx >= cur_id:
-                    cur_id = idx + 1
-
-                if args.seed is not None:
-                    if os.path.exists(c + '/has_died'):
-                        continue
-                    other_kwargs = json.load(open(c + '/kwargs.json'))
-                    is_same_kwargs = True
-                    for k, v in vars(args).items():
-                        def my_neq(a, b):
-                            if isinstance(a, tuple):
-                                a = list(a)
-                            if isinstance(b, tuple):
-                                b = list(b)
-                            return a != b
-                        if k != 'base_path' and my_neq(other_kwargs[k], v):
-                            is_same_kwargs = False
-                            break
-                    if is_same_kwargs:
-                        try:
-                            last_exp = sorted([e for e in glob.glob(c + '/*_experience.bz2') if 'thisisfake' not in e])[-1]
-                        except IndexError:
-                            continue
-                        mod_time = os.path.getmtime(last_exp)
-                        if time.time() - mod_time < 3600:
-                            print('Another run is already running at', c, 'exiting.')
-                            return
-                        compute = int(last_exp.split('/')[-1].split('_')[1])
-                        if compute >= args.max_compute_steps:
-                            print('A completed equivalent run already exists at', c, 'exiting.')
-                            return
-            except Exception:
-                pass
 
     base_path = f'{base_path}/{cur_id:04d}_{uuid.uuid4().hex}/'
     args.base_path = base_path
@@ -272,7 +157,7 @@ def run(base_path, args):
     print('Experiment running in', base_path)
 
     try:
-        _run(base_path, args)
+        _run(args)
     except Exception as e:
         import traceback
         print(e)
@@ -340,7 +225,6 @@ if __name__ == '__main__':
     current_group = parser.add_argument_group('Checkpointing')
     add_argument('--base_path', '-p', type=str, default='./results/', help='Folder in which to store results')
     add_argument('--path_postfix', '--pf', type=str, default='', help='String appended to the base path.')
-    add_argument('--seed_path', type=str, default=None, help='Path from which to load existing results.')
     add_argument('--checkpoint_game', type=int, default=20_000_000_000_000_000_000, help='Save a checkpoint every this many GAME frames (note: recommmended to ignore, since this grows very fast at the end).')
     add_argument('--checkpoint_compute', type=int, default=1_000_000, help='Save a checkpoint every this many COMPUTE frames.')
     boolarg('--pictures', dest='save_pictures', help='Save pictures of the pyramid every checkpoint (uses more space).')
@@ -374,10 +258,6 @@ if __name__ == '__main__':
     current_group = parser.add_argument_group('Atari Domain Knowledge')
     add_argument('--resolution', '--res', type=float, default=16, help='Length of the side of a grid cell.')
     boolarg('--use_objects', neg='--use_scores', default=True, help='Use objects in the cell description. Otherwise scores will be used.')
-    add_argument('--x_repeat', type=int, default=2, help='How much to duplicate pixels along the x direction. 2 is closer to how the games were meant to be played, but 1 is the original emulator resolution. NOTE: affects the behavior of GoExplore.')
-    boolarg('--objects_from_pixels', neg='--objects_from_ram', default=True, help='Get the objects from pixels instead of RAM.')
-    boolarg('--only_keys', neg='--all_objects', default=True, help='Use only the keys instead of all objects.')
-    boolarg('--remember_rooms', help='Remember which room the objects picked up came from. Makes it easier to solve the game (because the state encodes the location of the remaining keys anymore), but takes more time/memory space, which in practice makes it worse quite often. Using this is better if running with --no_optimize_score')
     add_argument('--pitfall_treasure_type', type=str, default='none', help='How to include treasures in the cell description of Pitfall: none (don\'t include treasures), count (include treasure count), score (include sum of positive rewards) or location (include the specific location the treasures were found).')
 
     current_group = parser.add_argument_group('Atari No Domain Knowledge')
@@ -415,7 +295,6 @@ if __name__ == '__main__':
     add_argument('--timestep', type=float, default=0.002, help='The size of a mujoco timestep.')
     add_argument('--total_timestep', type=float, default=None, help='The total timestep length (if included, timestep is ignored from the command line and instead set to total_timestep / nsubsteps). A reasonable value is 0.08')
     current_group = old_group
-    add_argument('--door_offset', type=float, default=None, help='Number to add to the door distance before dividing.')
     add_argument('--gripper_pos_resolution', type=float, default=0.5, help='Number by which to divide the gripper position.')
     add_argument('--door_weight', type=float, default=1.0, help='Weight of different door positions.')
     add_argument('--grip_weight', type=float, default=1.0, help='Weight of different grip positions.')
@@ -432,11 +311,8 @@ if __name__ == '__main__':
     add_argument('--pool_class', type=str, default='loky', help='The multiprocessing pool class (py or torch or loky).')
     add_argument('--start_method', type=str, default='fork', help='The process start method.')
     boolarg('--reset_pool', help='The pool should be reset every 100 iterations.')
-    boolarg('--profile', help='Whether or not to enable a profiler.')
 
     args = parser.parse_args()
-    if args.door_offset is None:
-        args.door_offset = args.door_resolution - 0.005
     if args.seed is not None:
         random.seed(args.seed)
         np.random.seed(args.seed + 1)
@@ -479,15 +355,4 @@ if __name__ == '__main__':
     MAX_CELLS = args.max_cells
     MAX_SCORE = args.max_score
 
-    assert args.pitfall_treasure_type in ('none', 'count', 'score', 'location')
-
-    if args.profile:
-        PROFILER = cProfile.Profile()
-        PROFILER.enable()
-    try:
-        run(args.base_path, args)
-        if PROFILER is not None:
-            PROFILER.disable()
-    finally:
-        if PROFILER is not None:
-            PROFILER.print_stats()
+    run(args.base_path, args)

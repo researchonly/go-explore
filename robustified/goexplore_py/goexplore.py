@@ -32,21 +32,6 @@ class LPool:
         return self.pool.map(f, r)
 
 
-class SyncPool:
-    def __init__(self, n_cpus, maxtasksperchild=100):
-        pass
-
-    def map(self, f, r):
-        res = []
-        f_pickle = pickle.dumps(f)
-        for e in r:
-            e = pickle.loads(pickle.dumps(e))
-            f2 = pickle.loads(f_pickle)
-            res.append(f2(e))
-
-        return res
-
-
 def run_f_seeded(args):
     f, seed, args = args
     with use_seed(seed):
@@ -91,28 +76,21 @@ class Discretizer:
 
 
 class GridDimension(Discretizer):
-    def __init__(self, attr, div, offset=0, sort=False):
+    def __init__(self, attr, div, sort=False):
         super().__init__(attr, sort=sort)
         self.div = div
-        self.offset = offset
 
     def apply_scalar(self, scalar):
         if scalar is None or isinstance(scalar, str):
             return scalar
         if self.div == 1:
             return scalar
-        return int(np.floor((scalar + self.offset) / self.div))
-
-    def __repr__(self):
-        return f'GridDimension("{self.attr}", {self.div}, {self.offset})'
-
+        return scalar // self.div
 
 class Cell:
-    def __init__(self, score=-infinity, seen_times=0, chosen_times=0, 
+    def __init__(self, score=-infinity, chosen_times=0, 
                  trajectory_len=infinity, restore=None, exact_pos=None, real_cell=None):
         self.score = score
-
-        self.seen_times = seen_times
         self.chosen_times = chosen_times
 
         self.trajectory_len = trajectory_len
@@ -164,22 +142,20 @@ class Explore:
             grid_info: tuple,
             pool_class,
             args,
-            important_attrs
     ):
         global POOL, ENV
         self.args = args
-        self.important_attrs = important_attrs
 
         self.prev_checkpoint = None
         self.env_info = env
         self.make_env()
         self.pool_class = pool_class
         if self.args.reset_pool:
-            # POOL = self.pool_class(multiprocessing.cpu_count() // 2)
-            POOL = self.pool_class(1)
+            POOL = self.pool_class(multiprocessing.cpu_count())
+            # POOL = self.pool_class(1)
         else:
-            # POOL = self.pool_class(multiprocessing.cpu_count() // 2, maxtasksperchild=100)
-            POOL = self.pool_class(1, maxtasksperchild=1)
+            POOL = self.pool_class(multiprocessing.cpu_count(), maxtasksperchild=100)
+            # POOL = self.pool_class(1, maxtasksperchild=1)
 
         self.explorer = explorer_policy
         self.selector = cell_selector
@@ -193,7 +169,6 @@ class Explore:
         self.state = None
         self.reset()
 
-        self.normal_frame_shape = (160, 210)
         cell_key = self.get_cell()
         self.grid[cell_key] = Cell()
         self.grid[cell_key].trajectory_len = 0
@@ -365,7 +340,6 @@ class Explore:
 
             start_cell = self.grid[cell_key]
             start_cell.chosen_times += 1
-            start_cell.seen_times += 1
             self.selector.cell_update(cell_key, start_cell)
             cur_score = cell_copy.score
             potential_cell = start_cell
@@ -379,7 +353,6 @@ class Explore:
                     potential_cell = self.grid[potential_cell_key]
                     if potential_cell_key not in seen_cells:
                         seen_cells.add(potential_cell_key)
-                        potential_cell.seen_times += 1
                         self.selector.cell_update(potential_cell_key, potential_cell)
 
                 full_traj_len = cell_copy.trajectory_len + i + 1
@@ -403,7 +376,6 @@ class Explore:
         if self.args.reset_cell_on_update:
             for cell_key in cells_to_reset:
                 self.grid[cell_key].chosen_times = 0
-                self.grid[cell_key].seen_times = 0
 
         return [(k) for k, c, s, n, shape, pix in chosen_cells], trajectories
 
